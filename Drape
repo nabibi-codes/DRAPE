@@ -1,0 +1,882 @@
+import { useState, useContext, createContext, useCallback, useRef } from "react";
+
+// ─── MOCK DATA ──────────────────────────────────────────────────────────────
+const INITIAL_PRODUCTS = [
+  { id: 1, name: "Sunrise Kameez", description: "Vibrant embroidered kameez with floral patterns, perfect for festive occasions.", category: "kameez", price: "8999", stock: 12, imageUrl: null },
+  { id: 2, name: "Classic White Shirt", description: "Crisp cotton poplin shirt with subtle texture and a relaxed modern fit.", category: "shirts", price: "4999", stock: 25, imageUrl: null },
+  { id: 3, name: "Midnight Dupatta", description: "Hand-block printed silk dupatta with gold border detailing.", category: "dupatta", price: "3499", stock: 8, imageUrl: null },
+  { id: 4, name: "Royal 3-Piece Suit", description: "Luxurious formal suit with matching shalwar and dupatta in premium fabric.", category: "3-piece suit", price: "19999", stock: 5, imageUrl: null },
+  { id: 5, name: "Summer Linen Pants", description: "Breathable wide-leg linen trousers with a high-rise waist and side pockets.", category: "pants", price: "6999", stock: 18, imageUrl: null },
+  { id: 6, name: "Floral Maxi Dress", description: "Floor-length printed dress with puff sleeves and a smocked bodice.", category: "dresses", price: "11999", stock: 7, imageUrl: null },
+  { id: 7, name: "Embroidered Kameez Set", description: "Traditional two-piece set with intricate mirror-work embroidery.", category: "kameez", price: "10999", stock: 10, imageUrl: null },
+  { id: 8, name: "Heritage Silk Dupatta", description: "Handwoven pure silk dupatta with zari borders — a timeless classic.", category: "dupatta", price: "5499", stock: 15, imageUrl: null },
+  { id: 9, name: "Pearl 3-Piece Collection", description: "Elegant chiffon three-piece with pearl embellishments and printed trousers.", category: "3-piece suit", price: "24999", stock: 3, imageUrl: null },
+  { id: 10, name: "Striped Oxford Shirt", description: "Slim-fit Oxford with bold candy stripes and contrast button placket.", category: "shirts", price: "5999", stock: 20, imageUrl: null },
+  { id: 11, name: "Cargo Wide Pants", description: "Utilitarian wide-leg pants with functional cargo pockets and elastic waist.", category: "pants", price: "7999", stock: 14, imageUrl: null },
+  { id: 12, name: "Wrap Midi Dress", description: "Versatile wrap dress in sustainable TENCEL fabric with a cinched waist.", category: "dresses", price: "8999", stock: 9, imageUrl: null },
+];
+
+const MOCK_VARIANTS = {};
+for (let i = 1; i <= 12; i++) {
+  MOCK_VARIANTS[i] = [
+    { id: i*10+1, size: "XS", color: "Blush" }, { id: i*10+2, size: "S", color: "Blush" },
+    { id: i*10+3, size: "M", color: "Blush" }, { id: i*10+4, size: "L", color: "Blush" },
+    { id: i*10+5, size: "M", color: "Sage" },  { id: i*10+6, size: "L", color: "Sage" },
+    { id: i*10+7, size: "XL", color: "Sage" },
+  ];
+}
+
+const fmt = (val) => "৳" + parseInt(val).toLocaleString("en-BD");
+
+const CATEGORY_PALETTE = {
+  kameez:         { bg: "#fde68a", text: "#92400e", dot: "#f59e0b" },
+  shirts:         { bg: "#bfdbfe", text: "#1e40af", dot: "#3b82f6" },
+  dupatta:        { bg: "#f9a8d4", text: "#9d174d", dot: "#ec4899" },
+  "3-piece suit": { bg: "#c4b5fd", text: "#4c1d95", dot: "#8b5cf6" },
+  pants:          { bg: "#6ee7b7", text: "#065f46", dot: "#10b981" },
+  dresses:        { bg: "#fed7aa", text: "#7c2d12", dot: "#f97316" },
+};
+const CATEGORY_ICONS = { kameez:"👘", shirts:"👔", dupatta:"🧣", "3-piece suit":"🎩", pants:"👖", dresses:"👗" };
+const getCategoryColor = (cat) => CATEGORY_PALETTE[cat] || { bg:"#e5e7eb", text:"#374151", dot:"#6b7280" };
+
+// ─── PRODUCTS CONTEXT (so uploads reflect everywhere) ────────────────────────
+const ProductsContext = createContext(null);
+function ProductsProvider({ children }) {
+  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const addProduct = (p) => setProducts(prev => [...prev, { ...p, id: Date.now() }]);
+  const deleteProduct = (id) => setProducts(prev => prev.filter(p => p.id !== id));
+  const updateImage = (id, imageUrl) => setProducts(prev => prev.map(p => p.id === id ? { ...p, imageUrl } : p));
+  return (
+    <ProductsContext.Provider value={{ products, addProduct, deleteProduct, updateImage }}>
+      {children}
+    </ProductsContext.Provider>
+  );
+}
+const useProducts = () => useContext(ProductsContext);
+
+// ─── CART CONTEXT ─────────────────────────────────────────────────────────────
+const CartContext = createContext(null);
+function CartProvider({ children }) {
+  const [items, setItems] = useState([]);
+  const addItem = useCallback((newItem) => {
+    setItems(prev => {
+      const idx = prev.findIndex(i => i.productId===newItem.productId && i.size===newItem.size && i.color===newItem.color);
+      if (idx > -1) { const u=[...prev]; u[idx]={...u[idx],quantity:u[idx].quantity+newItem.quantity}; return u; }
+      return [...prev, newItem];
+    });
+  }, []);
+  const removeItem = useCallback((productId,size,color) => setItems(prev=>prev.filter(i=>!(i.productId===productId&&i.size===size&&i.color===color))), []);
+  const updateQuantity = useCallback((productId,quantity,size,color) => {
+    if (quantity<=0) { removeItem(productId,size,color); return; }
+    setItems(prev=>prev.map(i=>i.productId===productId&&i.size===size&&i.color===color?{...i,quantity}:i));
+  }, [removeItem]);
+  const clearCart = useCallback(()=>setItems([]),[]);
+  const subtotal = items.reduce((s,i)=>s+i.price*i.quantity,0);
+  const tax = Math.round(subtotal*0.05);
+  const total = subtotal+tax;
+  const itemCount = items.reduce((s,i)=>s+i.quantity,0);
+  return <CartContext.Provider value={{items,addItem,removeItem,updateQuantity,clearCart,subtotal,tax,total,itemCount}}>{children}</CartContext.Provider>;
+}
+const useCart = () => useContext(CartContext);
+
+// ─── ORDERS STORE ─────────────────────────────────────────────────────────────
+const ordersStore = { orders: [], nextId: 1 };
+const genOrderNum = () => { const d=new Date(); return `ORD-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${Math.floor(Math.random()*99999).toString().padStart(5,"0")}`; };
+
+// ─── TOAST ────────────────────────────────────────────────────────────────────
+const ToastContext = createContext(null);
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const toast = useCallback((msg,type="success")=>{ const id=Date.now(); setToasts(p=>[...p,{id,msg,type}]); setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3000); },[]);
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div className="toast-container">
+        {toasts.map(t=><div key={t.id} className={`toast toast-${t.type}`}>{t.type==="success"?"✓":"✕"} {t.msg}</div>)}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+const useToast = () => useContext(ToastContext);
+
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{--peach:#FDE8D8;--mint:#A8E6CF;--lilac:#C9B8F0;--yellow:#FFE066;--coral:#FF6B6B;--navy:#1A1A2E;--white:#FFFDF9;--shadow:4px 4px 0px var(--navy);--shadow-lg:6px 6px 0px var(--navy);--radius:16px;--radius-sm:8px;}
+  body{font-family:'DM Sans',sans-serif;background:var(--peach);color:var(--navy);min-height:100vh;}
+  .app{min-height:100vh;position:relative;overflow-x:hidden;}
+  .app::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(circle at 5% 10%,var(--mint) 3%,transparent 3%),radial-gradient(circle at 90% 15%,var(--lilac) 5%,transparent 5%),radial-gradient(circle at 50% 90%,var(--yellow) 4%,transparent 4%),radial-gradient(circle at 80% 70%,var(--coral) 2%,transparent 2%),radial-gradient(circle at 20% 60%,var(--mint) 3%,transparent 3%);background-size:100% 100%;background-repeat:no-repeat;opacity:0.6;}
+  .app::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(circle,rgba(26,26,46,0.12) 1px,transparent 1px);background-size:32px 32px;}
+  .page{position:relative;z-index:1;}
+  .header{position:sticky;top:0;z-index:100;background:rgba(255,253,249,0.95);backdrop-filter:blur(12px);border-bottom:3px solid var(--navy);padding:0 2rem;}
+  .header-inner{max-width:1280px;margin:0 auto;padding:1rem 0;display:flex;align-items:center;justify-content:space-between;}
+  .logo{display:flex;align-items:center;gap:12px;cursor:pointer;}
+  .logo-mark{width:44px;height:44px;background:var(--navy);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;transform:rotate(-5deg);transition:transform 0.2s;}
+  .logo:hover .logo-mark{transform:rotate(5deg);}
+  .logo-text{font-family:'Unbounded',sans-serif;font-size:1.1rem;font-weight:900;letter-spacing:-0.04em;}
+  .logo-sub{font-size:0.65rem;color:#888;letter-spacing:0.1em;text-transform:uppercase;}
+  .header-nav{display:flex;align-items:center;gap:12px;}
+  .nav-btn{padding:8px 20px;border-radius:100px;font-size:0.9rem;font-weight:600;border:2.5px solid var(--navy);background:transparent;cursor:pointer;transition:all 0.15s;color:var(--navy);font-family:'DM Sans',sans-serif;}
+  .nav-btn:hover{background:var(--navy);color:var(--white);}
+  .cart-btn{position:relative;width:44px;height:44px;border-radius:12px;background:var(--navy);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.2rem;transition:all 0.15s;box-shadow:var(--shadow);}
+  .cart-btn:hover{transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);}
+  .cart-badge{position:absolute;top:-6px;right:-6px;background:var(--coral);color:white;border-radius:100px;font-size:0.65rem;font-weight:700;padding:2px 6px;border:2px solid var(--white);min-width:20px;text-align:center;}
+  .btn{padding:12px 28px;border-radius:var(--radius-sm);font-size:0.9rem;font-weight:700;border:2.5px solid var(--navy);cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:all 0.15s;font-family:'DM Sans',sans-serif;letter-spacing:0.01em;}
+  .btn-primary{background:var(--navy);color:var(--white);box-shadow:var(--shadow);}
+  .btn-primary:hover:not(:disabled){transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);}
+  .btn-primary:disabled{opacity:0.5;cursor:not-allowed;}
+  .btn-outline{background:transparent;color:var(--navy);}
+  .btn-outline:hover{background:var(--navy);color:var(--white);}
+  .btn-accent{background:var(--mint);color:var(--navy);box-shadow:var(--shadow);}
+  .btn-accent:hover{background:var(--coral);color:var(--white);transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);}
+  .btn-danger{background:var(--coral);color:white;box-shadow:var(--shadow);}
+  .btn-danger:hover{transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);}
+  .btn-sm{padding:6px 14px;font-size:0.8rem;border-radius:6px;}
+  .btn-lg{padding:16px 36px;font-size:1rem;}
+  .btn-full{width:100%;justify-content:center;}
+  .card{background:var(--white);border:2.5px solid var(--navy);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;}
+  .card-header{padding:1.25rem 1.5rem;border-bottom:2px solid var(--navy);}
+  .card-title{font-family:'Unbounded',sans-serif;font-size:0.95rem;font-weight:700;}
+  .card-body{padding:1.5rem;}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:0.75rem;font-weight:700;border:2px solid var(--navy);}
+  .badge-mint{background:var(--mint);} .badge-lilac{background:var(--lilac);} .badge-peach{background:var(--peach);}
+  .input{width:100%;padding:10px 14px;border:2.5px solid var(--navy);border-radius:var(--radius-sm);font-size:0.9rem;font-family:'DM Sans',sans-serif;background:var(--white);color:var(--navy);outline:none;transition:box-shadow 0.15s;}
+  .input:focus{box-shadow:0 0 0 3px rgba(168,230,207,0.5);}
+  .label{display:block;font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;}
+  .hero{padding:5rem 2rem 4rem;max-width:1280px;margin:0 auto;}
+  .hero-eyebrow{font-size:0.8rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#888;margin-bottom:1rem;}
+  .hero-title{font-family:'Unbounded',sans-serif;font-weight:900;font-size:clamp(2.5rem,6vw,5rem);line-height:1.05;letter-spacing:-0.04em;margin-bottom:1.5rem;}
+  .hero-title span{color:var(--coral);}
+  .hero-desc{font-size:1.1rem;color:#555;max-width:480px;line-height:1.7;margin-bottom:2.5rem;}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;}
+  .hero-stats{display:flex;gap:3rem;margin-top:3rem;padding-top:2rem;border-top:2px solid var(--navy);}
+  .stat-val{font-family:'Unbounded',sans-serif;font-size:2rem;font-weight:900;}
+  .stat-label{font-size:0.8rem;color:#888;margin-top:2px;}
+  .category-bar{padding:0 2rem 2rem;max-width:1280px;margin:0 auto;}
+  .category-pills{display:flex;gap:10px;flex-wrap:wrap;}
+  .pill{padding:8px 20px;border-radius:100px;font-size:0.85rem;font-weight:600;border:2.5px solid var(--navy);cursor:pointer;transition:all 0.15s;background:var(--white);color:var(--navy);display:flex;align-items:center;gap:6px;}
+  .pill.active{background:var(--navy);color:var(--white);}
+  .pill:hover:not(.active){transform:translateY(-2px);box-shadow:3px 3px 0 var(--navy);}
+  .products-section{padding:0 2rem 4rem;max-width:1280px;margin:0 auto;}
+  .section-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:1.5rem;}
+  .section-title{font-family:'Unbounded',sans-serif;font-size:1.3rem;font-weight:900;}
+  .section-count{font-size:0.85rem;color:#888;}
+  .products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.5rem;}
+  .product-card{background:var(--white);border:2.5px solid var(--navy);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
+  .product-card:hover{transform:translate(-3px,-3px);box-shadow:var(--shadow-lg);}
+  .product-img{height:220px;display:flex;align-items:center;justify-content:center;border-bottom:2px solid var(--navy);position:relative;overflow:hidden;}
+  .product-img img{width:100%;height:100%;object-fit:cover;}
+  .product-img-emoji{font-size:4.5rem;filter:drop-shadow(2px 2px 0 rgba(0,0,0,0.1));}
+  .product-cat-badge{position:absolute;top:12px;left:12px;z-index:2;padding:4px 12px;border-radius:100px;font-size:0.7rem;font-weight:700;border:2px solid var(--navy);text-transform:capitalize;}
+  .product-body{padding:1.25rem;}
+  .product-name{font-family:'Unbounded',sans-serif;font-size:0.85rem;font-weight:700;line-height:1.3;margin-bottom:0.5rem;}
+  .product-desc{font-size:0.8rem;color:#666;line-height:1.5;margin-bottom:1rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .product-footer{display:flex;align-items:center;justify-content:space-between;}
+  .product-price{font-family:'Unbounded',sans-serif;font-size:1.1rem;font-weight:900;color:var(--coral);}
+  .stock-dot{display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:600;}
+  .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;}
+  .dot.out{background:var(--coral);}
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:3rem;max-width:1280px;margin:0 auto;padding:3rem 2rem;}
+  @media(max-width:768px){.detail-grid{grid-template-columns:1fr;}}
+  .detail-img{height:460px;background:var(--white);border:2.5px solid var(--navy);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .detail-img img{width:100%;height:100%;object-fit:cover;}
+  .detail-info{display:flex;flex-direction:column;gap:1.5rem;}
+  .detail-price{font-family:'Unbounded',sans-serif;font-size:2rem;font-weight:900;color:var(--coral);}
+  .detail-desc{font-size:0.95rem;color:#555;line-height:1.8;}
+  .variant-label{font-size:0.75rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;color:#555;}
+  .variant-grid{display:flex;gap:8px;flex-wrap:wrap;}
+  .variant-btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:0.85rem;font-weight:600;border:2px solid var(--navy);cursor:pointer;background:var(--white);transition:all 0.12s;font-family:'DM Sans',sans-serif;}
+  .variant-btn.selected{background:var(--navy);color:var(--white);}
+  .variant-btn:hover:not(.selected){background:var(--peach);}
+  .qty-control{display:flex;align-items:center;gap:12px;}
+  .qty-btn{width:36px;height:36px;border-radius:8px;border:2px solid var(--navy);background:var(--white);cursor:pointer;font-size:1.1rem;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all 0.12s;}
+  .qty-btn:hover{background:var(--navy);color:var(--white);}
+  .qty-val{font-family:'Unbounded',sans-serif;font-size:1.1rem;font-weight:700;min-width:32px;text-align:center;}
+  .cart-layout{display:grid;grid-template-columns:1fr 360px;gap:2rem;max-width:1280px;margin:0 auto;padding:2rem;}
+  @media(max-width:900px){.cart-layout{grid-template-columns:1fr;}}
+  .cart-item{display:flex;gap:1rem;padding:1.25rem;border-bottom:2px solid #f0f0f0;align-items:flex-start;}
+  .cart-item-img{width:88px;height:88px;border-radius:12px;border:2px solid var(--navy);background:var(--peach);display:flex;align-items:center;justify-content:center;font-size:2.5rem;flex-shrink:0;overflow:hidden;}
+  .cart-item-img img{width:100%;height:100%;object-fit:cover;}
+  .cart-item-info{flex:1;}
+  .cart-item-name{font-family:'Unbounded',sans-serif;font-size:0.8rem;font-weight:700;margin-bottom:4px;}
+  .cart-item-variants{display:flex;gap:6px;margin-bottom:8px;}
+  .cart-item-price{font-size:0.85rem;color:#666;}
+  .cart-item-actions{display:flex;align-items:center;justify-content:space-between;margin-top:12px;}
+  .cart-subtotal{font-family:'Unbounded',sans-serif;font-size:1rem;font-weight:900;color:var(--coral);}
+  .remove-btn{width:32px;height:32px;border-radius:8px;border:2px solid var(--coral);background:transparent;cursor:pointer;color:var(--coral);display:flex;align-items:center;justify-content:center;transition:all 0.12s;}
+  .remove-btn:hover{background:var(--coral);color:white;}
+  .summary-card{position:sticky;top:88px;}
+  .summary-row{display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-bottom:1.5px solid #f0f0f0;font-size:0.9rem;}
+  .summary-total{font-family:'Unbounded',sans-serif;font-size:1.4rem;font-weight:900;color:var(--coral);}
+  .checkout-layout{display:grid;grid-template-columns:1fr 380px;gap:2rem;max-width:1280px;margin:0 auto;padding:2rem;}
+  @media(max-width:900px){.checkout-layout{grid-template-columns:1fr;}}
+  .form-group{margin-bottom:1.25rem;}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+  .form-section-title{font-family:'Unbounded',sans-serif;font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin:1.5rem 0 1rem;color:#888;}
+  .confirmation-hero{text-align:center;padding:3rem 2rem 2rem;max-width:600px;margin:0 auto;}
+  .success-ring{width:88px;height:88px;border-radius:50%;background:var(--mint);border:3px solid var(--navy);display:flex;align-items:center;justify-content:center;font-size:2.5rem;margin:0 auto 1.5rem;box-shadow:var(--shadow);animation:popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);}
+  @keyframes popIn{from{transform:scale(0) rotate(-20deg);opacity:0;}to{transform:scale(1) rotate(0);opacity:1;}}
+  .order-detail-grid{display:grid;grid-template-columns:1fr 360px;gap:2rem;max-width:1280px;margin:0 auto;padding:0 2rem 3rem;}
+  @media(max-width:900px){.order-detail-grid{grid-template-columns:1fr;}}
+  .timeline{display:flex;flex-direction:column;}
+  .timeline-step{display:flex;gap:1rem;position:relative;}
+  .timeline-step:not(:last-child)::after{content:'';position:absolute;left:19px;top:44px;bottom:0;width:2px;background:#e5e5e5;}
+  .timeline-icon{width:40px;height:40px;border-radius:50%;border:2.5px solid var(--navy);background:var(--white);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
+  .timeline-icon.done{background:var(--mint);}
+  .timeline-content{padding:0.5rem 0 2rem;}
+  .timeline-label{font-weight:700;font-size:0.9rem;}
+  .timeline-sub{font-size:0.8rem;color:#888;margin-top:2px;}
+  .orders-list{max-width:800px;margin:0 auto;padding:2rem;display:flex;flex-direction:column;gap:1rem;}
+  .order-row{background:var(--white);border:2.5px solid var(--navy);border-radius:var(--radius);box-shadow:var(--shadow);padding:1.25rem 1.5rem;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;display:grid;grid-template-columns:1fr 1fr 120px 140px;gap:1rem;align-items:center;}
+  .order-row:hover{transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);}
+  .order-num{font-family:'Unbounded',sans-serif;font-size:0.75rem;font-weight:700;}
+  .order-date,.order-amount{font-size:0.85rem;}
+  .order-amount{font-family:'Unbounded',sans-serif;font-weight:900;color:var(--coral);}
+  .status-badge{padding:5px 14px;border-radius:100px;font-size:0.75rem;font-weight:700;border:2px solid var(--navy);text-transform:capitalize;}
+  .status-pending{background:var(--yellow);} .status-confirmed,.status-delivered{background:var(--mint);} .status-shipped{background:var(--lilac);} .status-cancelled{background:var(--coral);color:white;}
+  .admin-layout{max-width:1100px;margin:0 auto;padding:2rem;}
+  .tabs{display:flex;border:2.5px solid var(--navy);border-radius:var(--radius-sm);overflow:hidden;width:fit-content;margin-bottom:2rem;}
+  .tab{padding:10px 28px;font-size:0.85rem;font-weight:700;cursor:pointer;border:none;background:var(--white);color:var(--navy);font-family:'DM Sans',sans-serif;transition:all 0.1s;}
+  .tab:not(:last-child){border-right:2px solid var(--navy);}
+  .tab.active{background:var(--navy);color:var(--white);}
+  .admin-product-row{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem;border-bottom:1.5px solid #f0f0f0;gap:1rem;}
+  .admin-product-name{font-weight:700;font-size:0.9rem;}
+  .admin-product-meta{font-size:0.8rem;color:#888;margin-top:2px;}
+  .empty-state{text-align:center;padding:5rem 2rem;}
+  .empty-icon{font-size:5rem;margin-bottom:1.5rem;}
+  .empty-title{font-family:'Unbounded',sans-serif;font-size:1.5rem;font-weight:900;margin-bottom:0.75rem;}
+  .empty-desc{color:#888;margin-bottom:2rem;}
+  .toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:8px;}
+  .toast{padding:12px 20px;border-radius:var(--radius-sm);font-size:0.875rem;font-weight:600;border:2.5px solid var(--navy);background:var(--white);box-shadow:var(--shadow);display:flex;align-items:center;gap:8px;min-width:240px;max-width:360px;animation:slideIn 0.2s ease-out;}
+  .toast-success{background:var(--mint);} .toast-error{background:var(--coral);color:white;}
+  @keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+  .page-header{background:rgba(255,253,249,0.95);backdrop-filter:blur(12px);border-bottom:2.5px solid var(--navy);padding:0 2rem;position:sticky;top:0;z-index:100;}
+  .page-header-inner{max-width:1280px;margin:0 auto;padding:1rem 0;display:flex;align-items:center;gap:1rem;}
+  .back-btn{width:40px;height:40px;border-radius:10px;border:2.5px solid var(--navy);background:var(--white);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.1rem;transition:all 0.12s;}
+  .back-btn:hover{background:var(--navy);color:var(--white);}
+  .page-title{font-family:'Unbounded',sans-serif;font-size:1rem;font-weight:700;}
+  .loading-state{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:1rem;}
+  .divider{border:none;border-top:2px solid #f0f0f0;margin:0.5rem 0;}
+  .fade-in{animation:fadeIn 0.3s ease-out;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+  /* ── IMAGE UPLOAD ── */
+  .upload-zone{border:2.5px dashed var(--navy);border-radius:var(--radius-sm);padding:1.25rem;text-align:center;cursor:pointer;transition:all 0.15s;background:var(--white);position:relative;}
+  .upload-zone:hover,.upload-zone.drag{background:var(--mint);border-style:solid;}
+  .upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+  .upload-zone-icon{font-size:2rem;margin-bottom:0.4rem;}
+  .upload-zone-label{font-size:0.82rem;font-weight:600;color:#555;}
+  .upload-zone-sub{font-size:0.72rem;color:#aaa;margin-top:2px;}
+  .img-preview{position:relative;border-radius:10px;overflow:hidden;border:2px solid var(--navy);}
+  .img-preview img{width:100%;height:120px;object-fit:cover;display:block;}
+  .img-remove{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;background:var(--coral);border:2px solid white;color:white;font-size:0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:700;}
+
+  /* admin product row image thumb */
+  .admin-thumb{width:52px;height:52px;border-radius:10px;border:2px solid var(--navy);object-fit:cover;flex-shrink:0;}
+  .admin-thumb-placeholder{width:52px;height:52px;border-radius:10px;border:2px solid var(--navy);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;}
+`;
+
+// ─── PRODUCT IMAGE DISPLAY ────────────────────────────────────────────────────
+function ProductImg({ product, style = {}, className = "" }) {
+  const pal = getCategoryColor(product.category);
+  if (product.imageUrl) {
+    return <img src={product.imageUrl} alt={product.name} style={{ width:"100%", height:"100%", objectFit:"cover", ...style }} className={className} />;
+  }
+  return (
+    <div style={{ width:"100%", height:"100%", background: pal.bg, display:"flex", alignItems:"center", justifyContent:"center", ...style }} className={className}>
+      <span style={{ fontSize:"4rem", filter:"drop-shadow(2px 2px 0 rgba(0,0,0,0.1))" }}>{CATEGORY_ICONS[product.category] || "👗"}</span>
+    </div>
+  );
+}
+
+// ─── IMAGE UPLOAD WIDGET ──────────────────────────────────────────────────────
+function ImageUpload({ value, onChange }) {
+  const [drag, setDrag] = useState(false);
+  const inputRef = useRef();
+
+  const handleFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => onChange(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div>
+      {value ? (
+        <div className="img-preview">
+          <img src={value} alt="preview" />
+          <button className="img-remove" onClick={() => onChange(null)} title="Remove">✕</button>
+        </div>
+      ) : (
+        <div className={`upload-zone ${drag ? "drag" : ""}`}
+          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}
+          onClick={() => inputRef.current.click()}
+        >
+          <input ref={inputRef} type="file" accept="image/*" onChange={e => handleFile(e.target.files[0])} style={{display:"none"}} />
+          <div className="upload-zone-icon">📸</div>
+          <div className="upload-zone-label">Click or drag & drop image</div>
+          <div className="upload-zone-sub">JPG, PNG, WEBP supported</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── HEADER ───────────────────────────────────────────────────────────────────
+function Header({ onNavigate }) {
+  const { itemCount } = useCart();
+  return (
+    <header className="header">
+      <div className="header-inner">
+        <div className="logo" onClick={() => onNavigate("home")}>
+          <div className="logo-mark">👗</div>
+          <div><div className="logo-text">DRAPE</div><div className="logo-sub">Clothing Store</div></div>
+        </div>
+        <nav className="header-nav">
+          <button className="nav-btn" onClick={() => onNavigate("orders")}>Orders</button>
+          <button className="nav-btn" onClick={() => onNavigate("admin")}>Admin</button>
+          <button className="cart-btn" onClick={() => onNavigate("cart")}>
+            🛒 {itemCount > 0 && <span className="cart-badge">{itemCount}</span>}
+          </button>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function StatusBadge({ status }) {
+  return <span className={`status-badge status-${status}`}>{status}</span>;
+}
+
+// ─── HOME ─────────────────────────────────────────────────────────────────────
+function Home({ onNavigate }) {
+  const { products } = useProducts();
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const categories = [...new Set(products.map(p => p.category))];
+  const displayed = selectedCategory ? products.filter(p => p.category === selectedCategory) : products;
+
+  return (
+    <div className="page fade-in">
+      <section className="hero">
+        <p className="hero-eyebrow">✦ New Season Collection</p>
+        <h1 className="hero-title">Dress to<br /><span>Impress.</span></h1>
+        <p className="hero-desc">Curated clothing with bold Memphis-inspired energy — from elegant dupattas to statement 3-piece suits.</p>
+        <div className="hero-actions">
+          <button className="btn btn-primary btn-lg" onClick={() => document.getElementById("products")?.scrollIntoView({ behavior:"smooth" })}>Shop Now →</button>
+          <button className="btn btn-outline btn-lg" onClick={() => onNavigate("orders")}>Track Orders</button>
+        </div>
+        <div className="hero-stats">
+          <div><div className="stat-val">{products.length}+</div><div className="stat-label">Products</div></div>
+          <div><div className="stat-val">{categories.length}</div><div className="stat-label">Categories</div></div>
+          <div><div className="stat-val">5★</div><div className="stat-label">Avg Rating</div></div>
+        </div>
+      </section>
+      <div className="category-bar">
+        <div className="category-pills">
+          <button className={`pill ${!selectedCategory?"active":""}`} onClick={() => setSelectedCategory(null)}>🌀 All</button>
+          {categories.map(cat => {
+            const pal = getCategoryColor(cat);
+            return <button key={cat} className={`pill ${selectedCategory===cat?"active":""}`}
+              onClick={() => setSelectedCategory(selectedCategory===cat?null:cat)}
+              style={selectedCategory===cat?{}:{background:pal.bg+"88"}}>
+              {CATEGORY_ICONS[cat]} {cat.charAt(0).toUpperCase()+cat.slice(1)}
+            </button>;
+          })}
+        </div>
+      </div>
+      <section id="products" className="products-section">
+        <div className="section-header">
+          <h2 className="section-title">{selectedCategory?selectedCategory.toUpperCase():"ALL PRODUCTS"}</h2>
+          <span className="section-count">{displayed.length} items</span>
+        </div>
+        <div className="products-grid">
+          {displayed.map(product => {
+            const pal = getCategoryColor(product.category);
+            return (
+              <div key={product.id} className="product-card" onClick={() => onNavigate("product", product.id)}>
+                <div className="product-img" style={{ background: pal.bg }}>
+                  <ProductImg product={product} />
+                  <span className="product-cat-badge" style={{ background:pal.bg, color:pal.text }}>{product.category}</span>
+                </div>
+                <div className="product-body">
+                  <div className="product-name">{product.name}</div>
+                  <div className="product-desc">{product.description}</div>
+                  <div className="product-footer">
+                    <div className="product-price">{fmt(product.price)}</div>
+                    <div className="stock-dot"><div className={`dot ${product.stock===0?"out":""}`} />{product.stock>0?`${product.stock} left`:"Out"}</div>
+                  </div>
+                  <button className="btn btn-accent btn-full" style={{marginTop:"1rem"}}
+                    onClick={e => { e.stopPropagation(); onNavigate("product", product.id); }}
+                    disabled={product.stock===0}>
+                    {product.stock===0?"Out of Stock":"View Details →"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ─── PRODUCT DETAIL ───────────────────────────────────────────────────────────
+function ProductDetail({ productId, onNavigate }) {
+  const { products } = useProducts();
+  const product = products.find(p => p.id === productId);
+  const variants = MOCK_VARIANTS[productId] || MOCK_VARIANTS[1];
+  const { addItem } = useCart();
+  const toast = useToast();
+  const [qty, setQty] = useState(1);
+  const [size, setSize] = useState(null);
+  const [color, setColor] = useState(null);
+
+  if (!product) return <div className="loading-state"><p>Product not found</p></div>;
+  const sizes = [...new Set(variants.map(v => v.size))];
+  const colors = [...new Set(variants.map(v => v.color))];
+  const pal = getCategoryColor(product.category);
+
+  const handleAdd = () => {
+    if (!size || !color) { toast("Please select size and color","error"); return; }
+    addItem({ productId:product.id, productName:product.name, price:parseInt(product.price), quantity:qty, size, color, imageUrl:product.imageUrl });
+    toast("Added to cart!");
+    onNavigate("cart");
+  };
+
+  return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><button className="back-btn" onClick={() => onNavigate("home")}>←</button><span className="page-title">Product Details</span></div></div>
+      <div className="detail-grid">
+        <div>
+          <div className="detail-img" style={{ background: pal.bg }}>
+            <ProductImg product={product} />
+          </div>
+        </div>
+        <div className="detail-info">
+          <span className="badge badge-mint" style={{ background:pal.bg, borderColor:pal.dot }}>{product.category}</span>
+          <div>
+            <h1 style={{fontFamily:"'Unbounded',sans-serif",fontSize:"1.6rem",fontWeight:900,lineHeight:1.2,marginBottom:"0.75rem"}}>{product.name}</h1>
+            <div className="detail-price">{fmt(product.price)}</div>
+          </div>
+          <p className="detail-desc">{product.description}</p>
+          <div className="stock-dot"><div className={`dot ${product.stock===0?"out":""}`} /><span style={{fontSize:"0.85rem",fontWeight:600}}>{product.stock>0?`${product.stock} in stock`:"Out of stock"}</span></div>
+          <div><div className="variant-label">Size</div><div className="variant-grid">{sizes.map(s=><button key={s} className={`variant-btn ${size===s?"selected":""}`} onClick={()=>setSize(s)}>{s}</button>)}</div></div>
+          <div><div className="variant-label">Color</div><div className="variant-grid">{colors.map(c=><button key={c} className={`variant-btn ${color===c?"selected":""}`} onClick={()=>setColor(c)}>{c}</button>)}</div></div>
+          <div>
+            <div className="variant-label">Quantity</div>
+            <div className="qty-control">
+              <button className="qty-btn" onClick={()=>setQty(Math.max(1,qty-1))}>−</button>
+              <span className="qty-val">{qty}</span>
+              <button className="qty-btn" onClick={()=>setQty(Math.min(product.stock,qty+1))}>+</button>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <button className="btn btn-primary btn-lg btn-full" onClick={handleAdd} disabled={product.stock===0}>🛒 Add to Cart</button>
+            <button className="btn btn-outline btn-full" onClick={()=>onNavigate("home")}>← Continue Shopping</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CART ─────────────────────────────────────────────────────────────────────
+function CartPage({ onNavigate }) {
+  const { items, removeItem, updateQuantity, clearCart, subtotal, tax, total, itemCount } = useCart();
+  const { products } = useProducts();
+  const toast = useToast();
+
+  if (items.length === 0) return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><button className="back-btn" onClick={()=>onNavigate("home")}>←</button><span className="page-title">Shopping Cart</span></div></div>
+      <div className="empty-state"><div className="empty-icon">🛒</div><h2 className="empty-title">Your cart is empty</h2><p className="empty-desc">Add some items to get started!</p><button className="btn btn-primary" onClick={()=>onNavigate("home")}>Shop Now →</button></div>
+    </div>
+  );
+
+  return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><button className="back-btn" onClick={()=>onNavigate("home")}>←</button><span className="page-title">Shopping Cart ({itemCount} items)</span></div></div>
+      <div className="cart-layout">
+        <div className="card">
+          <div className="card-header"><span className="card-title">Cart Items</span></div>
+          {items.map((item,idx) => {
+            const prod = products.find(p=>p.id===item.productId);
+            const pal = getCategoryColor(prod?.category);
+            return (
+              <div key={idx} className="cart-item">
+                <div className="cart-item-img" style={{background:pal?.bg||"#f9f9f9"}}>
+                  {prod?.imageUrl ? <img src={prod.imageUrl} alt={item.productName} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+                    : (CATEGORY_ICONS[prod?.category]||"👗")}
+                </div>
+                <div className="cart-item-info">
+                  <div className="cart-item-name">{item.productName}</div>
+                  <div className="cart-item-variants">
+                    {item.size&&<span className="badge badge-peach">Size: {item.size}</span>}
+                    {item.color&&<span className="badge badge-lilac" style={{background:"var(--lilac)"}}>Color: {item.color}</span>}
+                  </div>
+                  <div className="cart-item-price">{fmt(item.price)} each</div>
+                  <div className="cart-item-actions">
+                    <div className="qty-control">
+                      <button className="qty-btn" style={{width:28,height:28}} onClick={()=>updateQuantity(item.productId,item.quantity-1,item.size,item.color)}>−</button>
+                      <span className="qty-val" style={{fontSize:"0.9rem"}}>{item.quantity}</span>
+                      <button className="qty-btn" style={{width:28,height:28}} onClick={()=>updateQuantity(item.productId,item.quantity+1,item.size,item.color)}>+</button>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span className="cart-subtotal">{fmt(item.price*item.quantity)}</span>
+                      <button className="remove-btn" onClick={()=>{removeItem(item.productId,item.size,item.color);toast("Removed","error");}}>✕</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{padding:"1rem 1.5rem"}}><button className="btn btn-outline btn-sm" onClick={()=>{clearCart();toast("Cart cleared");}}>Clear Cart</button></div>
+        </div>
+        <div className="summary-card card">
+          <div className="card-header"><span className="card-title">Order Summary</span></div>
+          <div className="card-body">
+            <div className="summary-row"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+            <div className="summary-row"><span>VAT (5%)</span><span>{fmt(tax)}</span></div>
+            <div className="summary-row"><span style={{fontWeight:700}}>Total</span><span className="summary-total">{fmt(total)}</span></div>
+            <div style={{marginTop:"1.5rem",display:"flex",flexDirection:"column",gap:10}}>
+              <button className="btn btn-primary btn-full btn-lg" onClick={()=>onNavigate("checkout")}>Checkout →</button>
+              <button className="btn btn-outline btn-full" onClick={()=>onNavigate("home")}>Continue Shopping</button>
+            </div>
+            <div style={{marginTop:"1rem",padding:"0.75rem",background:"#f9fafb",borderRadius:8,fontSize:"0.75rem",color:"#888",textAlign:"center"}}>Free delivery in Dhaka · Est. 3–5 days</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CHECKOUT ─────────────────────────────────────────────────────────────────
+function CheckoutPage({ onNavigate }) {
+  const { items, subtotal, tax, total, clearCart } = useCart();
+  const toast = useToast();
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ customerName:"", customerEmail:"", customerPhone:"", shippingAddress:"", shippingCity:"", shippingState:"", shippingZip:"", shippingCountry:"Bangladesh" });
+
+  if (!items.length) return <div className="loading-state"><p>Cart is empty</p><button className="btn btn-primary" onClick={()=>onNavigate("home")}>← Shop</button></div>;
+
+  const handle = e => setForm(f=>({...f,[e.target.name]:e.target.value}));
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.customerName||!form.customerEmail||!form.customerPhone) { toast("Fill in personal details","error"); return; }
+    if (!form.shippingAddress||!form.shippingCity||!form.shippingZip) { toast("Fill in shipping address","error"); return; }
+    setSubmitting(true);
+    await new Promise(r=>setTimeout(r,1200));
+    const orderNum = genOrderNum();
+    ordersStore.orders.unshift({ id:ordersStore.nextId++, orderNumber:orderNum, ...form, items:items.map(i=>({...i,subtotal:i.price*i.quantity})), subtotal, taxAmount:tax, totalAmount:total, status:"pending", createdAt:new Date().toISOString() });
+    clearCart(); setSubmitting(false);
+    onNavigate("confirmation", orderNum);
+  };
+
+  return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><button className="back-btn" onClick={()=>onNavigate("cart")}>←</button><span className="page-title">Checkout</span></div></div>
+      <div className="checkout-layout">
+        <div className="card">
+          <div className="card-header"><span className="card-title">Shipping Information</span></div>
+          <div className="card-body">
+            <form onSubmit={handleSubmit}>
+              <p className="form-section-title">Personal Details</p>
+              <div className="form-group"><label className="label">Full Name *</label><input className="input" name="customerName" value={form.customerName} onChange={handle} placeholder="রাহেলা বেগম" required /></div>
+              <div className="form-row">
+                <div className="form-group"><label className="label">Email *</label><input className="input" type="email" name="customerEmail" value={form.customerEmail} onChange={handle} placeholder="example@gmail.com" required /></div>
+                <div className="form-group"><label className="label">Phone *</label><input className="input" type="tel" name="customerPhone" value={form.customerPhone} onChange={handle} placeholder="+880 1700 000000" required /></div>
+              </div>
+              <p className="form-section-title">Shipping Address</p>
+              <div className="form-group"><label className="label">Street Address *</label><input className="input" name="shippingAddress" value={form.shippingAddress} onChange={handle} placeholder="House 12, Road 4, Dhanmondi" required /></div>
+              <div className="form-row">
+                <div className="form-group"><label className="label">City *</label><input className="input" name="shippingCity" value={form.shippingCity} onChange={handle} placeholder="Dhaka" required /></div>
+                <div className="form-group"><label className="label">District</label><input className="input" name="shippingState" value={form.shippingState} onChange={handle} placeholder="Dhaka" /></div>
+              </div>
+              <div className="form-row">
+                <div className="form-group"><label className="label">Postal Code *</label><input className="input" name="shippingZip" value={form.shippingZip} onChange={handle} placeholder="1205" required /></div>
+                <div className="form-group"><label className="label">Country</label><input className="input" name="shippingCountry" value={form.shippingCountry} onChange={handle} /></div>
+              </div>
+              <button type="submit" className="btn btn-primary btn-full btn-lg" disabled={submitting} style={{marginTop:"1rem"}}>{submitting?"⏳ Processing…":"Place Order →"}</button>
+            </form>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-header"><span className="card-title">Order Summary</span></div>
+          <div className="card-body">
+            {items.map((item,i)=><div key={i} className="summary-row"><span style={{fontSize:"0.82rem",color:"#666"}}>{item.productName} ×{item.quantity}</span><span style={{fontWeight:600}}>{fmt(item.price*item.quantity)}</span></div>)}
+            <hr className="divider" style={{margin:"0.75rem 0"}} />
+            <div className="summary-row"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+            <div className="summary-row"><span>VAT (5%)</span><span>{fmt(tax)}</span></div>
+            <div className="summary-row" style={{borderBottom:"none"}}><span style={{fontWeight:700}}>Total</span><span className="summary-total">{fmt(total)}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CONFIRMATION ─────────────────────────────────────────────────────────────
+function OrderConfirmation({ orderNumber, onNavigate }) {
+  const order = ordersStore.orders.find(o=>o.orderNumber===orderNumber);
+  if (!order) return <div className="loading-state"><p>Order not found</p><button className="btn btn-primary" onClick={()=>onNavigate("home")}>Home</button></div>;
+  const estDelivery = new Date(Date.now()+5*24*60*60*1000);
+
+  return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><span className="page-title">Order Confirmation</span></div></div>
+      <div className="confirmation-hero">
+        <div className="success-ring">✓</div>
+        <h2 style={{fontFamily:"'Unbounded',sans-serif",fontSize:"1.6rem",fontWeight:900,marginBottom:"0.75rem"}}>Order Placed!</h2>
+        <p style={{color:"#666",marginBottom:"0.5rem"}}>Your order is confirmed and will ship soon.</p>
+        <p style={{fontSize:"0.85rem",color:"#888"}}>Confirmation sent to <strong>{order.customerEmail}</strong></p>
+      </div>
+      <div className="order-detail-grid">
+        <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
+          <div className="card">
+            <div className="card-header"><span className="card-title">Order Details</span></div>
+            <div className="card-body" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}}>
+              <div><div style={{fontSize:"0.75rem",color:"#888",marginBottom:4}}>Order Number</div><div style={{fontFamily:"'Unbounded',sans-serif",fontWeight:900,fontSize:"0.9rem"}}>{order.orderNumber}</div></div>
+              <div><div style={{fontSize:"0.75rem",color:"#888",marginBottom:4}}>Status</div><StatusBadge status={order.status} /></div>
+              <div><div style={{fontSize:"0.75rem",color:"#888",marginBottom:4}}>Date</div><div style={{fontWeight:600}}>{new Date(order.createdAt).toLocaleDateString()}</div></div>
+              <div><div style={{fontSize:"0.75rem",color:"#888",marginBottom:4}}>Est. Delivery</div><div style={{fontWeight:600}}>{estDelivery.toLocaleDateString()}</div></div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-header"><span className="card-title">Items Ordered</span></div>
+            <div className="card-body" style={{display:"flex",flexDirection:"column",gap:10}}>
+              {order.items.map((item,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.75rem",background:"#f9f9f9",borderRadius:10}}>
+                  <div><div style={{fontWeight:700,fontSize:"0.9rem"}}>{item.productName}</div><div style={{fontSize:"0.8rem",color:"#888",marginTop:2}}>{item.size&&`Size: ${item.size}`} {item.color&&`· ${item.color}`} · Qty: {item.quantity}</div></div>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontWeight:900,color:"var(--coral)"}}>{fmt(item.subtotal)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div>
+          <div className="card summary-card">
+            <div className="card-header"><span className="card-title">Price Summary</span></div>
+            <div className="card-body">
+              <div className="summary-row"><span>Subtotal</span><span>{fmt(order.subtotal)}</span></div>
+              <div className="summary-row"><span>VAT</span><span>{fmt(order.taxAmount)}</span></div>
+              <div className="summary-row" style={{borderBottom:"none"}}><span style={{fontWeight:700}}>Total</span><span className="summary-total">{fmt(order.totalAmount)}</span></div>
+              <div style={{marginTop:"1.5rem",display:"flex",flexDirection:"column",gap:10}}>
+                <button className="btn btn-primary btn-full" onClick={()=>onNavigate("home")}>Continue Shopping</button>
+                <button className="btn btn-outline btn-full" onClick={()=>onNavigate("orders")}>View All Orders</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ORDERS ───────────────────────────────────────────────────────────────────
+function OrdersPage({ onNavigate }) {
+  const orders = ordersStore.orders;
+  return (
+    <div className="page fade-in">
+      <div className="page-header"><div className="page-header-inner"><button className="back-btn" onClick={()=>onNavigate("home")}>←</button><span className="page-title">Order History</span></div></div>
+      {!orders.length ? (
+        <div className="empty-state"><div className="empty-icon">📦</div><h2 className="empty-title">No orders yet</h2><p className="empty-desc">Start shopping to see orders here!</p><button className="btn btn-primary" onClick={()=>onNavigate("home")}>Shop Now →</button></div>
+      ) : (
+        <div className="orders-list">
+          <h2 style={{fontFamily:"'Unbounded',sans-serif",fontWeight:900,fontSize:"1.1rem",marginBottom:"0.5rem"}}>{orders.length} Orders</h2>
+          {orders.map(order=>(
+            <div key={order.id} className="order-row" onClick={()=>onNavigate("confirmation",order.orderNumber)}>
+              <div><div className="order-num">{order.orderNumber}</div><div className="order-date">{new Date(order.createdAt).toLocaleDateString()}</div></div>
+              <div><div style={{fontSize:"0.8rem",color:"#888"}}>Customer</div><div style={{fontWeight:600,fontSize:"0.9rem"}}>{order.customerName}</div></div>
+              <div className="order-amount">{fmt(order.totalAmount)}</div>
+              <StatusBadge status={order.status} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ADMIN ────────────────────────────────────────────────────────────────────
+function AdminDashboard({ onNavigate }) {
+  const { products, addProduct, deleteProduct, updateImage } = useProducts();
+  const toast = useToast();
+  const [tab, setTab] = useState("products");
+  const [orders, setOrders] = useState(ordersStore.orders);
+  const [form, setForm] = useState({ name:"", description:"", category:"", price:"", stock:"" });
+  const [newImage, setNewImage] = useState(null);
+  const [editingImageId, setEditingImageId] = useState(null);
+  const [editImageVal, setEditImageVal] = useState(null);
+
+  const handleCreate = (e) => {
+    e.preventDefault();
+    if (!form.name||!form.category||!form.price) { toast("Fill required fields","error"); return; }
+    addProduct({ ...form, stock:parseInt(form.stock)||0, imageUrl:newImage||null });
+    setForm({ name:"",description:"",category:"",price:"",stock:"" });
+    setNewImage(null);
+    toast("Product created!");
+  };
+
+  const handleStatusUpdate = (orderId, status) => {
+    const idx = ordersStore.orders.findIndex(o=>o.id===orderId);
+    if (idx>-1) ordersStore.orders[idx].status=status;
+    setOrders([...ordersStore.orders]);
+    toast(`Order marked as ${status}`);
+  };
+
+  const saveEditImage = (id) => {
+    updateImage(id, editImageVal);
+    setEditingImageId(null);
+    setEditImageVal(null);
+    toast("Image updated!");
+  };
+
+  return (
+    <div className="page fade-in">
+      <div className="page-header">
+        <div className="page-header-inner">
+          <button className="back-btn" onClick={()=>onNavigate("home")}>←</button>
+          <span className="page-title">Admin Dashboard</span>
+          <span className="badge badge-mint" style={{marginLeft:"auto"}}>Admin</span>
+        </div>
+      </div>
+      <div className="admin-layout">
+        <div className="tabs">
+          <button className={`tab ${tab==="products"?"active":""}`} onClick={()=>setTab("products")}>Products</button>
+          <button className={`tab ${tab==="orders"?"active":""}`} onClick={()=>setTab("orders")}>Orders</button>
+        </div>
+
+        {tab==="products" && (
+          <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
+            {/* Add product form */}
+            <div className="card">
+              <div className="card-header"><span className="card-title">Add New Product</span></div>
+              <div className="card-body">
+                <form onSubmit={handleCreate}>
+                  <div className="form-row" style={{marginBottom:"1rem"}}>
+                    <div className="form-group"><label className="label">Product Name *</label><input className="input" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Classic Kameez" /></div>
+                    <div className="form-group"><label className="label">Category *</label><input className="input" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} placeholder="kameez" /></div>
+                  </div>
+                  <div className="form-group" style={{marginBottom:"1rem"}}><label className="label">Description</label><input className="input" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Product description..." /></div>
+                  <div className="form-row" style={{marginBottom:"1rem"}}>
+                    <div className="form-group"><label className="label">Price (৳) *</label><input className="input" type="number" value={form.price} onChange={e=>setForm(f=>({...f,price:e.target.value}))} placeholder="4999" /></div>
+                    <div className="form-group"><label className="label">Stock</label><input className="input" type="number" value={form.stock} onChange={e=>setForm(f=>({...f,stock:e.target.value}))} placeholder="10" /></div>
+                  </div>
+                  <div className="form-group" style={{marginBottom:"1.25rem"}}>
+                    <label className="label">Product Image</label>
+                    <ImageUpload value={newImage} onChange={setNewImage} />
+                  </div>
+                  <button type="submit" className="btn btn-primary">+ Add Product</button>
+                </form>
+              </div>
+            </div>
+
+            {/* Product list */}
+            <div className="card">
+              <div className="card-header"><span className="card-title">Products ({products.length})</span></div>
+              {products.map(p => {
+                const pal = getCategoryColor(p.category);
+                const isEditing = editingImageId === p.id;
+                return (
+                  <div key={p.id}>
+                    <div className="admin-product-row">
+                      <div style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0}}>
+                        {p.imageUrl
+                          ? <img src={p.imageUrl} alt={p.name} className="admin-thumb" />
+                          : <div className="admin-thumb-placeholder" style={{background:pal.bg}}>{CATEGORY_ICONS[p.category]||"👗"}</div>
+                        }
+                        <div style={{minWidth:0}}>
+                          <div className="admin-product-name">{p.name}</div>
+                          <div className="admin-product-meta">{p.category} · {fmt(p.price)} · Stock: {p.stock}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexShrink:0}}>
+                        <button className="btn btn-outline btn-sm" onClick={()=>{ setEditingImageId(isEditing?null:p.id); setEditImageVal(p.imageUrl); }}>
+                          {isEditing?"✕ Cancel":"📸 Image"}
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={()=>{ deleteProduct(p.id); toast("Deleted"); }}>Delete</button>
+                      </div>
+                    </div>
+                    {isEditing && (
+                      <div style={{padding:"1rem 1.5rem",background:"#fafafa",borderBottom:"1.5px solid #f0f0f0"}}>
+                        <div style={{maxWidth:320}}>
+                          <label className="label" style={{marginBottom:8}}>Upload / Change Image for "{p.name}"</label>
+                          <ImageUpload value={editImageVal} onChange={setEditImageVal} />
+                          <button className="btn btn-primary btn-sm" style={{marginTop:10}} onClick={()=>saveEditImage(p.id)}>Save Image</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab==="orders" && (
+          <div className="card">
+            <div className="card-header"><span className="card-title">Orders ({orders.length})</span></div>
+            {!orders.length ? <div style={{padding:"2rem",textAlign:"center",color:"#888"}}>No orders yet.</div>
+              : orders.map(order=>(
+                <div key={order.id} style={{padding:"1.25rem 1.5rem",borderBottom:"2px solid #f0f0f0"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"0.75rem",flexWrap:"wrap",gap:8}}>
+                    <div>
+                      <div style={{fontFamily:"'Unbounded',sans-serif",fontWeight:700,fontSize:"0.85rem"}}>{order.orderNumber}</div>
+                      <div style={{fontSize:"0.82rem",color:"#888"}}>{order.customerName} · {order.customerEmail}</div>
+                    </div>
+                    <div style={{fontFamily:"'Unbounded',sans-serif",fontWeight:900,color:"var(--coral)"}}>{fmt(order.totalAmount)}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                    <StatusBadge status={order.status} />
+                    <div style={{display:"flex",gap:8}}>
+                      {order.status!=="shipped"&&order.status!=="delivered"&&order.status!=="cancelled"&&<button className="btn btn-outline btn-sm" onClick={()=>handleStatusUpdate(order.id,"shipped")}>Mark Shipped</button>}
+                      {order.status!=="delivered"&&order.status!=="cancelled"&&<button className="btn btn-accent btn-sm" onClick={()=>handleStatusUpdate(order.id,"delivered")}>Mark Delivered</button>}
+                      {order.status!=="cancelled"&&<button className="btn btn-danger btn-sm" onClick={()=>handleStatusUpdate(order.id,"cancelled")}>Cancel</button>}
+                    </div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [route, setRoute] = useState({ page:"home", param:null });
+  const navigate = (page, param=null) => setRoute({ page, param });
+
+  const renderPage = () => {
+    switch (route.page) {
+      case "home":         return <Home onNavigate={navigate} />;
+      case "product":      return <ProductDetail productId={route.param} onNavigate={navigate} />;
+      case "cart":         return <CartPage onNavigate={navigate} />;
+      case "checkout":     return <CheckoutPage onNavigate={navigate} />;
+      case "confirmation": return <OrderConfirmation orderNumber={route.param} onNavigate={navigate} />;
+      case "orders":       return <OrdersPage onNavigate={navigate} />;
+      case "admin":        return <AdminDashboard onNavigate={navigate} />;
+      default:             return <Home onNavigate={navigate} />;
+    }
+  };
+
+  return (
+    <ProductsProvider>
+      <CartProvider>
+        <ToastProvider>
+          <style>{STYLES}</style>
+          <div className="app">
+            {route.page !== "confirmation" && <Header onNavigate={navigate} />}
+            {renderPage()}
+          </div>
+        </ToastProvider>
+      </CartProvider>
+    </ProductsProvider>
+  );
+}
