@@ -345,8 +345,7 @@ try{const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
  else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}}
 catch(e){toast('Something went wrong making the picture.')}finally{btn.disabled=false}}
 function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
-function wrapLines(c,text,maxW){const out=[];text.split('\n').forEach(par=>{if(!par){out.push('');return}let line='';par.split(/(\s+)/).forEach(w=>{const test=line+w;if(c.measureText(test).width>maxW&&line.trim()){out.push(line.trimEnd());line=w.trimStart()}else line=test});out.push(line.trimEnd())});return out}
-function coverDraw(c,img,x,y,w,h){const s=Math.max(w/img.width,h/img.height),sw=w/s,sh=h/s;c.drawImage(img,(img.width-sw)/2,(img.height-sh)/2,sw,sh,x,y,w,h)}
+function coverDraw(c,img,x,y,w,h,a){a=a||{x:50,y:50,z:1};const s=Math.max(w/img.width,h/img.height)*a.z,bw=img.width*s,bh=img.height*s;c.save();c.beginPath();c.rect(x,y,w,h);c.clip();c.drawImage(img,x+(w-bw)*a.x/100,y+(h-bh)*a.y/100,bw,bh);c.restore()}
 
 /* letter */
 async function letterPNG(){const img=$('#lstamp img'),W=img.naturalWidth*2,H=img.naturalHeight*2,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
@@ -366,8 +365,8 @@ if(film){c.fillStyle='#CCA7BC';for(let y=11;y<h;y+=22){[9,w-9].forEach(x=>{c.beg
 const imgs=await Promise.all(photos.map(p=>loadImg(p).catch(()=>null)));const fg=film?'#CCA7BC':(pol?'#430D2B':'#fff');
 for(let i=0;i<3;i++){const col=i%cols,row=Math.floor(i/cols),x=padX+col*(cw+gap),y=pad+row*(chh+gap);c.save();
  if(pol){c.translate(x+cw/2,y+chh/2);c.rotate((i%2?2:-2)*Math.PI/180);c.translate(-cw/2,-chh/2);c.shadowColor='#0004';c.shadowBlur=8;c.shadowOffsetY=3;c.fillStyle='#fff';c.fillRect(0,0,cw,chh);c.shadowColor='transparent';
-  const px=8,py=8,pw=cw-16,ph=chh-30;c.fillStyle='#0002';c.fillRect(px,py,pw,ph);if(imgs[i])coverDraw(c,imgs[i],px,py,pw,ph);else{c.fillStyle='#fffb';c.font='13px Fraunces,serif';c.textAlign='center';c.textBaseline='middle';c.fillText('Photo '+(i+1),px+pw/2,py+ph/2)}}
- else{rrect(c,x,y,cw,chh,sh?16:(film?2:0));c.clip();c.fillStyle='#00000022';c.fillRect(x,y,cw,chh);if(imgs[i])coverDraw(c,imgs[i],x,y,cw,chh);else{c.fillStyle='#fffb';c.font='13px Fraunces,serif';c.textAlign='center';c.textBaseline='middle';c.fillText('Photo '+(i+1),x+cw/2,y+chh/2)}}
+  const px=8,py=8,pw=cw-16,ph=chh-30;c.fillStyle='#0002';c.fillRect(px,py,pw,ph);if(imgs[i])coverDraw(c,imgs[i],px,py,pw,ph,adj[i]);else{c.fillStyle='#fffb';c.font='13px Fraunces,serif';c.textAlign='center';c.textBaseline='middle';c.fillText('Photo '+(i+1),px+pw/2,py+ph/2)}}
+ else{rrect(c,x,y,cw,chh,sh?16:(film?2:0));c.clip();c.fillStyle='#00000022';c.fillRect(x,y,cw,chh);if(imgs[i])coverDraw(c,imgs[i],x,y,cw,chh,adj[i]);else{c.fillStyle='#fffb';c.font='13px Fraunces,serif';c.textAlign='center';c.textBaseline='middle';c.fillText('Photo '+(i+1),x+cw/2,y+chh/2)}}
  c.restore()}
 try{await document.fonts.load('italic 500 18px Fraunces')}catch(e){}
 c.fillStyle=fg;c.font='italic 500 18px Fraunces,Georgia,serif';c.textAlign='center';c.textBaseline='middle';
